@@ -7,3 +7,4 @@
 
 pub mod chunk;
 pub mod encrypt;
+pub mod metadata;

@@ -26,6 +26,12 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+/// 数据接收监听器类型
+type DataListener = Box<dyn Fn(String, Vec<u8>) + Send + Sync>;
+
+/// 已知节点信息类型
+type KnownNodeInfo = (NodeID, ConnectionType, NodeStatus);
+
 /// 默认 VPN 端口
 pub const DEFAULT_VPN_PORT: u16 = 9877;
 
@@ -72,9 +78,9 @@ pub struct VpnRouter {
     /// 运行标志
     running: Arc<AtomicBool>,
     /// 数据接收监听器
-    listeners: Arc<Mutex<Vec<Box<dyn Fn(String, Vec<u8>) + Send + Sync>>>>,
+    listeners: Arc<Mutex<Vec<DataListener>>>,
     /// 已知节点表：名字 → (NodeID, 连接类型, 状态)
-    known_nodes: Arc<Mutex<HashMap<String, (NodeID, ConnectionType, NodeStatus)>>>,
+    known_nodes: Arc<Mutex<HashMap<String, KnownNodeInfo>>>,
 }
 
 impl VpnRouter {

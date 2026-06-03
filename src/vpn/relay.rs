@@ -37,6 +37,14 @@ pub enum MessageType {
     Heartbeat,
     /// 中继
     Relay,
+    /// 注册中心消息
+    Registry,
+    /// DHT 发现消息
+    Dht,
+    /// 多跳路由消息
+    Route,
+    /// 自愈消息
+    SelfHeal,
 }
 
 impl MessageType {
@@ -47,6 +55,10 @@ impl MessageType {
             0x03 => Some(Self::Ack),
             0x04 => Some(Self::Heartbeat),
             0x05 => Some(Self::Relay),
+            0x06 => Some(Self::Registry),
+            0x07 => Some(Self::Dht),
+            0x08 => Some(Self::Route),
+            0x09 => Some(Self::SelfHeal),
             _ => None,
         }
     }
@@ -58,6 +70,10 @@ impl MessageType {
             Self::Ack => 0x03,
             Self::Heartbeat => 0x04,
             Self::Relay => 0x05,
+            Self::Registry => 0x06,
+            Self::Dht => 0x07,
+            Self::Route => 0x08,
+            Self::SelfHeal => 0x09,
         }
     }
 }
@@ -560,6 +576,10 @@ mod tests {
         assert_eq!(MessageType::from_u8(0x03), Some(MessageType::Ack));
         assert_eq!(MessageType::from_u8(0x04), Some(MessageType::Heartbeat));
         assert_eq!(MessageType::from_u8(0x05), Some(MessageType::Relay));
+        assert_eq!(MessageType::from_u8(0x06), Some(MessageType::Registry));
+        assert_eq!(MessageType::from_u8(0x07), Some(MessageType::Dht));
+        assert_eq!(MessageType::from_u8(0x08), Some(MessageType::Route));
+        assert_eq!(MessageType::from_u8(0x09), Some(MessageType::SelfHeal));
         assert_eq!(MessageType::from_u8(0xFF), None);
 
         assert_eq!(MessageType::Handshake.to_u8(), 0x01);
@@ -567,6 +587,10 @@ mod tests {
         assert_eq!(MessageType::Ack.to_u8(), 0x03);
         assert_eq!(MessageType::Heartbeat.to_u8(), 0x04);
         assert_eq!(MessageType::Relay.to_u8(), 0x05);
+        assert_eq!(MessageType::Registry.to_u8(), 0x06);
+        assert_eq!(MessageType::Dht.to_u8(), 0x07);
+        assert_eq!(MessageType::Route.to_u8(), 0x08);
+        assert_eq!(MessageType::SelfHeal.to_u8(), 0x09);
     }
 
     #[test]

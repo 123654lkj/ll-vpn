@@ -70,11 +70,11 @@
 - 定义路由表结构 `RouteTable`：目标 → 路由器映射
 
 **验收标准**：
-```go
-type Router interface {
-    Send(target string, data []byte) error
-    Status() RouterStatus
-    Name() string
+```rust
+trait Router {
+    fn send(&self, target: &str, data: &[u8]) -> Result<(), Error>;
+    fn status(&self) -> RouterStatus;
+    fn name(&self) -> &str;
 }
 ```
 
@@ -98,10 +98,10 @@ type Router interface {
 - 错误处理：未知节点、解析超时
 
 **验收标准**：
-```go
-type AddressResolver interface {
-    Resolve(name string) (NodeID, error)
-    Cache(name string, id NodeID, ttl time.Duration)
+```rust
+trait AddressResolver {
+    fn resolve(&self, name: &str) -> Result<NodeID, Error>;
+    fn cache(&self, name: &str, id: NodeID, ttl: Duration);
 }
 ```
 
@@ -169,12 +169,14 @@ type AddressResolver interface {
 - 持久化：首次生成后保存到本地
 
 **验收标准**：
-```go
-type NodeID [32]byte
+```rust
+struct NodeID([u8; 32]);
 
-func GenerateNodeID(key ed25519.PublicKey) NodeID
-func (n NodeID) Distance(other NodeID) float64
-func (n NodeID) String() string  // hex 缩写
+impl NodeID {
+    fn from_public_key(key: &ed25519::PublicKey) -> Self;
+    fn distance(&self, other: &NodeID) -> f64;
+    fn to_hex(&self) -> String;
+}
 ```
 
 ---

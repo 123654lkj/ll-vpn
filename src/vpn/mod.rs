@@ -9,3 +9,6 @@ pub mod relay;
 pub mod selfheal;
 pub mod session;
 pub mod vpn_router;
+pub mod hole_punch;
+pub mod multipath;
+pub mod stats;

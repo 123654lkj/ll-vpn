@@ -15,7 +15,9 @@ use crate::address::{resolve_address, MemAddressResolver, ParsedAddress};
 use crate::router::{NodeStatus, Router, RouterError};
 use crate::storage::chunk::{Chunker, FileManifest};
 use crate::storage::encrypt::Encryptor;
+use crate::storage::gc::GarbageCollector;
 use crate::storage::metadata::{BlockLocation, MetadataStore};
+use crate::storage::version::VersionManager;
 use crate::vpn::vpn_router::VpnRouter;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -51,6 +53,27 @@ pub enum Command {
         target: String,
         /// 本地恢复路径
         path: String,
+    },
+    /// 存储垃圾回收: ll storage gc
+    StorageGC,
+    /// 存储版本修剪: ll storage prune <keep>
+    StoragePrune {
+        /// 保留的版本数
+        keep: usize,
+    },
+    /// 存储统计: ll storage stats
+    StorageStats,
+    /// 增量同步上传: ll increment <path> node:<name>
+    Increment {
+        /// 本地文件路径
+        path: String,
+        /// 目标节点地址
+        target: String,
+    },
+    /// 版本历史: ll version <file>
+    Version {
+        /// 文件名
+        file: String,
     },
 }
 
@@ -168,8 +191,59 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
             };
             Ok(Command::Restore { target, path })
         }
+        "storage" => {
+            if cmd_args.len() < 3 {
+                return Err("usage: ll storage <gc|prune|stats> [args]".to_string());
+            }
+            match cmd_args[2].as_str() {
+                "gc" => Ok(Command::StorageGC),
+                "prune" => {
+                    let keep = if cmd_args.len() > 3 {
+                        cmd_args[3].parse::<usize>().map_err(|_| {
+                            format!("invalid number '{}': expected a positive integer", cmd_args[3])
+                        })?
+                    } else {
+                        10 // default keep count
+                    };
+                    if keep == 0 {
+                        return Err("keep count must be positive".to_string());
+                    }
+                    Ok(Command::StoragePrune { keep })
+                }
+                "stats" => Ok(Command::StorageStats),
+                sub => Err(format!(
+                    "unknown storage subcommand '{}'. Available: gc, prune, stats",
+                    sub
+                )),
+            }
+        }
+        "increment" | "inc" => {
+            if cmd_args.len() < 4 {
+                return Err(
+                    "usage: ll increment <path> node:<name>".to_string(),
+                );
+            }
+            let path = cmd_args[2].clone();
+            let target = cmd_args[3].clone();
+            if !ParsedAddress::is_node_address(&target) {
+                return Err(format!(
+                    "invalid target address '{}': expected node:<name>",
+                    target
+                ));
+            }
+            Ok(Command::Increment { path, target })
+        }
+        "version" | "ver" => {
+            if cmd_args.len() < 3 {
+                return Err(
+                    "usage: ll version <file>".to_string(),
+                );
+            }
+            let file = cmd_args[2].clone();
+            Ok(Command::Version { file })
+        }
         sub => Err(format!(
-            "unknown subcommand '{}'. Available: cmd, ping, nodes, status, backup, restore",
+            "unknown subcommand '{}'. Available: cmd, ping, nodes, status, backup, restore, storage, increment, version",
             sub
         )),
     }
@@ -248,8 +322,55 @@ fn parse_short_command(args: &[String]) -> Result<Command, String> {
             };
             Ok(Command::Restore { target, path })
         }
+        "storage" => {
+            if args.len() < 2 {
+                return Err("usage: storage <gc|prune|stats> [args]".to_string());
+            }
+            match args[1].as_str() {
+                "gc" => Ok(Command::StorageGC),
+                "prune" => {
+                    let keep = if args.len() > 2 {
+                        args[2].parse::<usize>().map_err(|_| {
+                            format!("invalid number '{}': expected a positive integer", args[2])
+                        })?
+                    } else {
+                        10
+                    };
+                    if keep == 0 {
+                        return Err("keep count must be positive".to_string());
+                    }
+                    Ok(Command::StoragePrune { keep })
+                }
+                "stats" => Ok(Command::StorageStats),
+                sub => Err(format!(
+                    "unknown storage subcommand '{}'. Available: gc, prune, stats",
+                    sub
+                )),
+            }
+        }
+        "increment" | "inc" => {
+            if args.len() < 3 {
+                return Err("usage: increment <path> node:<name>".to_string());
+            }
+            let path = args[1].clone();
+            let target = args[2].clone();
+            if !ParsedAddress::is_node_address(&target) {
+                return Err(format!(
+                    "invalid target address '{}': expected node:<name>",
+                    target
+                ));
+            }
+            Ok(Command::Increment { path, target })
+        }
+        "version" | "ver" => {
+            if args.len() < 2 {
+                return Err("usage: version <file>".to_string());
+            }
+            let file = args[1].clone();
+            Ok(Command::Version { file })
+        }
         _ => Err(format!(
-            "unknown command '{}'. Available: ll cmd, ll ping, ll nodes, ll status, ll backup, ll restore",
+            "unknown command '{}'. Available: ll cmd, ll ping, ll nodes, ll status, ll backup, ll restore, ll storage, ll increment, ll version",
             args[0]
         )),
     }
@@ -298,6 +419,11 @@ pub fn execute_cmd(
         Command::Status => execute_status(vpn),
         Command::Backup { path, target } => execute_backup(&path, &target, vpn),
         Command::Restore { target, path } => execute_restore(&target, &path, vpn),
+        Command::StorageGC => execute_storage_gc(),
+        Command::StoragePrune { keep } => execute_storage_prune(keep),
+        Command::StorageStats => execute_storage_stats(),
+        Command::Increment { path, target } => execute_increment(&path, &target, vpn),
+        Command::Version { file } => execute_version(&file),
     }
 }
 
@@ -512,6 +638,160 @@ fn execute_restore(target: &str, local_path: &str, vpn: &VpnRouter) -> Result<St
         "Restore completed: {} → {}\n  File: {} ({} bytes)\n  Chunks: {}\n  Integrity: verified",
         target, local_path, file_name, total_size, chunk_count,
     ))
+}
+
+/// 执行存储垃圾回收
+///
+/// `ll storage gc`:
+/// 扫描所有版本与元数据，找出无引用块并返回可回收信息。
+fn execute_storage_gc() -> Result<String, String> {
+    let version_manager = VersionManager::load_from_file(
+        crate::storage::version::DEFAULT_VERSION_DB_PATH,
+    )?;
+    let metadata_store = MetadataStore::load_from_file(
+        crate::storage::metadata::DEFAULT_METADATA_PATH,
+    ).map_err(|e| e.to_string())?;
+
+    let gc = GarbageCollector::new();
+    let result = gc.collect(&version_manager, &metadata_store)?;
+    Ok(result.to_string())
+}
+
+/// 执行版本修剪
+///
+/// `ll storage prune <keep>`:
+/// 只保留每个文件最近 N 个版本。
+fn execute_storage_prune(keep: usize) -> Result<String, String> {
+    let version_manager = VersionManager::load_from_file(
+        crate::storage::version::DEFAULT_VERSION_DB_PATH,
+    )?;
+
+    let gc = GarbageCollector::new();
+    let pruned = gc.prune_old_versions(&version_manager, keep)?;
+
+    version_manager.flush().map_err(|e| format!("failed to save version store: {}", e))?;
+
+    Ok(format!(
+        "Pruned {} version(s). Kept {} most recent version(s) per file.",
+        pruned, keep
+    ))
+}
+
+/// 执行存储统计
+///
+/// `ll storage stats`:
+/// 显示总存储量、块数、版本数、可回收空间。
+fn execute_storage_stats() -> Result<String, String> {
+    let version_manager = VersionManager::load_from_file(
+        crate::storage::version::DEFAULT_VERSION_DB_PATH,
+    )?;
+    let metadata_store = MetadataStore::load_from_file(
+        crate::storage::metadata::DEFAULT_METADATA_PATH,
+    ).map_err(|e| e.to_string())?;
+
+    let gc = GarbageCollector::new();
+    let stats = gc.storage_stats(&version_manager, &metadata_store)?;
+    Ok(stats.to_string())
+}
+
+/// 执行增量同步上传
+///
+/// `ll increment <path> node:<name>`:
+/// 使用增量同步只上传变更的块。
+///
+/// 注：当前实现发送完整文件，后续可用 IncrementalSync 优化。
+fn execute_increment(path: &str, target: &str, vpn: &VpnRouter) -> Result<String, String> {
+    // 解析目标节点
+    let parsed = ParsedAddress::parse(target)
+        .map_err(|e| format!("invalid target address: {}", e))?;
+
+    let file_name = std::path::Path::new(path)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string());
+
+    // 1. 读取文件
+    let data = std::fs::read(path)
+        .map_err(|e| format!("failed to read '{}': {}", path, e))?;
+    let file_size = data.len();
+
+    // 2. 分块
+    let chunker = crate::storage::chunk::Chunker::new();
+    let (manifest, chunks) = chunker.chunk_data(&data);
+    let chunk_count = chunks.len();
+
+    // 3. 发送块数据到目标节点
+    for (i, chunk) in chunks.iter().enumerate() {
+        let payload = serde_json::json!({
+            "file_name": file_name,
+            "chunk_index": i,
+            "total_chunks": chunk_count,
+            "file_size": file_size,
+            "data_hex": hex::encode(chunk),
+        });
+        let msg = format!("INCR_BLOCK:{}", payload.to_string());
+        vpn.send(target, msg.as_bytes())
+            .map_err(|e| format!("failed to send block {}: {}", i, e))?;
+    }
+
+    // 4. 发送清单
+    let manifest_json = serde_json::to_string(&manifest)
+        .map_err(|e| format!("failed to serialize manifest: {}", e))?;
+    let meta_msg = format!("INCR_MANIFEST:{}:{}", file_name, manifest_json);
+    vpn.send(target, meta_msg.as_bytes())
+        .map_err(|e| format!("failed to send manifest: {}", e))?;
+
+    // 5. 创建版本快照
+    let version_manager = VersionManager::load_from_file(
+        crate::storage::version::DEFAULT_VERSION_DB_PATH,
+    )?;
+    let version_id = version_manager.create_snapshot(&file_name, manifest, "increment")?;
+    version_manager.flush().map_err(|e| format!("failed to save version: {}", e))?;
+
+    Ok(format!(
+        "Incremental sync completed: {} → {}\n  File: {} ({} bytes)\n  Chunks: {}\n  Version: {}",
+        path,
+        target,
+        file_name,
+        file_size,
+        chunk_count,
+        version_id,
+    ))
+}
+
+/// 执行版本查询
+///
+/// `ll version <file>`:
+/// 显示指定文件的所有版本历史。
+fn execute_version(file: &str) -> Result<String, String> {
+    let version_manager = VersionManager::load_from_file(
+        crate::storage::version::DEFAULT_VERSION_DB_PATH,
+    )?;
+
+    let versions = version_manager.list_versions(file);
+    if versions.is_empty() {
+        return Ok(format!("No versions found for '{}'.", file));
+    }
+
+    let mut output = format!("Version history for '{}':\n", file);
+    output.push_str(&format!(
+        "{:<22} {:<20} {:<10} {}\n",
+        "Version ID", "Timestamp", "Size", "Annotation"
+    ));
+    output.push_str(&"-".repeat(80));
+    output.push('\n');
+
+    for v in &versions {
+        output.push_str(&format!(
+            "{:<22} {:<20} {:<10} {}\n",
+            v.version_id,
+            v.timestamp,
+            v.manifest.file_size,
+            v.annotation,
+        ));
+    }
+
+    Ok(output)
 }
 
 /// 执行远程命令

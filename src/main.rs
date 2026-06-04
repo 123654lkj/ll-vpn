@@ -43,6 +43,14 @@ fn setup_static_nodes(resolver: &MemAddressResolver) {
 }
 
 fn main() {
+    // 环境变量覆盖端口
+    let lan_port: u16 = std::env::var("LL_VPN_LAN_PORT").ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(LAN_PORT);
+    let vpn_port: u16 = std::env::var("LL_VPN_PORT").ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(VPN_PORT);
+
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
@@ -58,10 +66,10 @@ fn main() {
     setup_static_nodes(&resolver);
 
     // 初始化 LAN 路由器
-    let lan_router = Arc::new(LanRouter::with_port(LOCAL_NODE_NAME, node_id, LAN_PORT));
+    let lan_router = Arc::new(LanRouter::with_port(LOCAL_NODE_NAME, node_id, lan_port));
 
     // 初始化中继管理器
-    let relay_manager = RelayManager::new(node_id, VPN_PORT);
+    let relay_manager = RelayManager::new(node_id, vpn_port);
 
     // 初始化 VPN 路由器
     let vpn_router = VpnRouter::new(

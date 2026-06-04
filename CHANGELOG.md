@@ -15,3 +15,14 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - **fix**: 补全截断的 handshake.rs 并修复测试 (#8383e57)
+
+### Added
+
+- **P5-2**: 增量同步 — IncrementalSync (859行, 15测试) (#auto)
+  - `sync_file()` 只上传变化块
+  - `download_file()` 只下载缺失块
+  - 同步状态跟踪（最后同步时间）
+- **P5-3**: 版本历史 — VersionManager (996行, 30测试)
+  - `create_snapshot()` / `list_versions()` / `restore_version()`
+  - `prune_versions()` 清理旧版本
+

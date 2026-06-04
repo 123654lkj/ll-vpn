@@ -6,6 +6,9 @@
 //! over the DHT layer.
 
 pub mod chunk;
+pub mod diff;
 pub mod download;
 pub mod encrypt;
+pub mod incremental;
 pub mod metadata;
+pub mod version;

@@ -91,6 +91,20 @@ fn main() {
                 println!("[{}] Remote command received: {}", from, cmd);
             } else if msg.starts_with("PING:") {
                 // PING 消息由 ping_node 内部处理
+            } else if msg.starts_with("BACKUP_CHUNK:") {
+                let payload = &msg["BACKUP_CHUNK:".len()..];
+                println!("[{}] Backup chunk received: {} bytes of metadata", from, payload.len());
+                // In production, store to disk
+            } else if msg.starts_with("BACKUP_META:") {
+                let payload = &msg["BACKUP_META:".len()..];
+                println!("[{}] Backup metadata received: {} bytes", from, payload.len());
+                // In production, register in MetadataStore
+            } else if msg.starts_with("RESTORE_GET_META:") {
+                println!("[{}] Restore metadata request received", from);
+                // In production, look up MetadataStore and respond
+            } else if msg.starts_with("RESTORE_GET_CHUNK:") {
+                println!("[{}] Restore chunk request received", from);
+                // In production, look up stored chunk and respond
             } else {
                 println!("[{}] Data received: {} bytes", from, msg.len());
             }
@@ -117,10 +131,14 @@ fn print_usage() {
     println!("  ll ping node:<name>             Test connectivity to node");
     println!("  ll nodes                        List known nodes");
     println!("  ll status                       Show local node information");
+    println!("  ll backup <path> node:<name>    Backup file to remote node");
+    println!("  ll restore node:<name>:<path>   Restore file from remote node");
     println!();
     println!("Examples:");
     println!("  ll ping node:Pikachu");
     println!("  ll cmd node:Charizard uptime");
+    println!("  ll backup /etc/config.yaml node:Pikachu");
+    println!("  ll restore node:Pikachu:/backup/config.yaml ./restored.yaml");
     println!("  ll nodes");
     println!("  ll status");
 }
@@ -129,7 +147,6 @@ fn print_usage() {
 mod tests {
     use ll_vpn::address::AddressResolver;
     use ll_vpn::address::MemAddressResolver;
-    use ll_vpn::vpn::identity::NodeID;
 
     #[test]
     fn test_setup_static_nodes() {
